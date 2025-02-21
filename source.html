@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waste Segregation System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 1000px;
+            background: #ffffff;
+            box-shadow: 0px 0px 15px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .heading {
+            font-size: 50px;
+            color: #126038dc;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+
+        .quote {
+            font-size: 20px;
+            color: #285813dc;
+            margin-bottom: 20px;
+            font-style: italic;
+            font-weight: 500;
+        }
+
+        button {
+            padding: 10px 30px;
+            background-color: #ff002b;
+            color: #ffffff;
+            font-size: 18px;
+            font-weight: 700;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            box-shadow: 0px 5px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-container, .camera-buttons {
+            margin-top: 10px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        button:hover {
+            background-color: #d90024;
+            transform: translateY(-3px);
+        }
+
+        .start {
+            padding: 10px 202px;
+            background-color: #1bb140;
+        }
+
+        .start:hover {
+            background-color: #169c37;
+        }
+
+        #webcam-container, #label-container, #points-container, #qr-code-container {
+            margin-top: 30px;
+        }
+
+        #label-container div {
+            font-size: 20px;
+            color: #333;
+            margin-bottom: 10px;
+            padding: 5px 10px;
+            background: #f8f8f8;
+            border-radius: 8px;
+        }
+
+        #points-container {
+            font-size: 24px;
+            color: #126038dc;
+            font-weight: 700;
+            margin-top: 20px;
+        }
+
+        #qr-code-container img {
+            margin-top: 20px;
+            width: 150px;
+            height: 150px;
+        }
+
+        #videoElement {
+            max-width: 60%;
+            border-radius: 8px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="heading">BinIT</div>
+        <div class="quote">Be a Part of the Solution and Not the Pollution</div>
+        <div class="btn-container">
+            <button type="button" class="start" onclick="startAndGenerateQR()">Start</button>
+        </div>
+        <div class="camera-buttons">
+            <button type="button" id="switchCameraButton" onclick="switchCamera()">Switch Camera</button>
+        </div>
+        
+
+        <div id="webcam-container">
+            <video id="videoElement" autoplay playsinline></video>
+            <canvas id="canvasElement" style="display:none;"></canvas>
+        </div>
+
+        <div id="label-container"></div>
+        <div id="points-container">
+            Points: <span id="points">0</span>
+        </div>
+        <div id="qr-code-container">
+            <img id="qr-code" src="" alt="QR Code will appear here">
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+    <script type="text/javascript">
+        const URL = "./";
+        let model, maxPredictions, currentStream, isCameraInitialized = false, currentFacingMode = 'environment';
+
+        async function startAndGenerateQR() {
+            if (!isCameraInitialized) {
+                await switchCamera();  // Initialize the camera with back camera as default
+            }
+
+            // Load the Teachable Machine model
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+
+            model = await tmImage.load(modelURL, metadataURL);
+            maxPredictions = model.getTotalClasses();
+
+            // Once the model is loaded, take a picture and process it
+            takePicture();
+        }
+
+        async function switchCamera() {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+
+            const constraints = {
+                video: {
+                    facingMode: currentFacingMode
+                }
+            };
+
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                const videoElement = document.getElementById('videoElement');
+                videoElement.srcObject = currentStream;
+                isCameraInitialized = true;
+            } catch (error) {
+                console.error("Error accessing the camera: ", error);
+            }
+        }
+
+        async function takePicture() {
+            const canvas = document.getElementById('canvasElement');
+            const video = document.getElementById('videoElement');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/png');
+
+            const image = new Image();
+            image.src = imageData;
+            image.onload = async function () {
+                const prediction = await predictImage(image);
+                displayResults(prediction);
+            };
+        }
+
+        async function predictImage(image) {
+            const predictions = await model.predict(image);
+            return predictions;
+        }
+
+        function displayResults(predictions) {
+            const labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = ''; // Clear previous predictions
+            for (let i = 0; i < maxPredictions; i++) {
+                labelContainer.appendChild(document.createElement("div"));
+            }
+
+            let class1Percentage = 0;
+            let class2Percentage = 0;
+
+            if (maxPredictions > 0) class1Percentage = predictions[0].probability * 100;
+            if (maxPredictions > 1) class2Percentage = predictions[1].probability * 100;
+
+            for (let i = 0; i < maxPredictions; i++) {
+                const classPrediction = predictions[i].className + ": " + (predictions[i].probability * 100).toFixed(2) + "%";
+                labelContainer.childNodes[i].innerHTML = classPrediction;
+            }
+
+            const totalPoints = 0.25 * class1Percentage + 0.1 * class2Percentage;
+            document.getElementById("points").innerText = totalPoints.toFixed(2);
+
+            generateQRCode(class1Percentage, class2Percentage, totalPoints);
+        }
+
+        function generateQRCode(class1Percentage, class2Percentage, totalPoints) {
+            const qrData = `Degradable: ${class1Percentage.toFixed(2)}% Non degradable: ${class2Percentage.toFixed(2)}% Points: ${totalPoints.toFixed(2)}`;
+            const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrData)}`;
+            document.getElementById("qr-code").src = qrCodeUrl;
+        }
+    </script>
+</body>
+</html>
